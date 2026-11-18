@@ -38,12 +38,12 @@ private struct FakeTart: CommandRunner {
     }
 }
 
-private func module(
+private func plugin(
     get: Result<String, CommandFailure>,
     exec: Result<String, CommandFailure> = .failure(CommandFailure(message: "not running")),
     files: [String: String] = ["state": "START_TIME=0\nLAST_ACTIVE=\(1_800_000_000 - 180)\n"]
-) -> TartRunnerModule {
-    TartRunnerModule(
+) -> TartRunnersPlugin {
+    TartRunnersPlugin(
         config: TartRunnerConfig(
             tart: "/tart", vm: "ci-runner", stateDirectory: URL(fileURLWithPath: "/state")),
         runner: FakeTart(get: get, exec: exec),
@@ -56,88 +56,88 @@ private func module(
 struct TartRunnersTests {
     @Test("shows the job, guest usage, and allocation of a busy VM")
     func showsBusyVM() async {
-        let rows = await module(
+        let rows = await plugin(
             get: .success(runningJSON),
             exec: .success(probeOutput(state: "busy", lock: "simpleiptv-apple"))
         ).rows()
 
         #expect(
             rows == [
-                ModuleRow(name: "ci-runner", value: "Running · Busy"),
-                ModuleRow(name: "Job", value: "simpleiptv-apple"),
-                ModuleRow(name: "Guest", value: "3.97 GB of 8 GB · load 3.1"),
-                ModuleRow(name: "Allocated", value: "12 CPU · 32 GB"),
-                ModuleRow(name: "Last active", value: "3m ago"),
+                PluginRow(name: "ci-runner", value: "Running · Busy"),
+                PluginRow(name: "Job", value: "simpleiptv-apple"),
+                PluginRow(name: "Guest", value: "3.97 GB of 8 GB · load 3.1"),
+                PluginRow(name: "Allocated", value: "12 CPU · 32 GB"),
+                PluginRow(name: "Last active", value: "3m ago"),
             ])
     }
 
     @Test("hides a stale job lock when no job runs")
     func hidesStaleLock() async {
-        let rows = await module(
+        let rows = await plugin(
             get: .success(runningJSON),
             exec: .success(probeOutput(state: "idle", lock: "retrokit"))
         ).rows()
 
-        #expect(rows.first == ModuleRow(name: "ci-runner", value: "Running · Idle"))
+        #expect(rows.first == PluginRow(name: "ci-runner", value: "Running · Idle"))
         #expect(!rows.contains { $0.name == "Job" })
     }
 
     @Test("shows only the state and last activity of a stopped VM")
     func showsStoppedVM() async {
-        let rows = await module(get: .success(stoppedJSON)).rows()
+        let rows = await plugin(get: .success(stoppedJSON)).rows()
 
         #expect(
             rows == [
-                ModuleRow(name: "ci-runner", value: "Stopped"),
-                ModuleRow(name: "Last active", value: "3m ago"),
+                PluginRow(name: "ci-runner", value: "Stopped"),
+                PluginRow(name: "Last active", value: "3m ago"),
             ])
     }
 
     @Test("shows the tart error when the VM cannot be read")
     func showsTartError() async {
-        let rows = await module(
+        let rows = await plugin(
             get: .failure(CommandFailure(message: "not found")), files: [:]
         ).rows()
 
-        #expect(rows == [ModuleRow(name: "tart", value: "not found")])
+        #expect(rows == [PluginRow(name: "tart", value: "not found")])
     }
 
     @Test("keeps the other rows when the guest probe fails")
     func keepsRowsWhenProbeFails() async {
-        let rows = await module(get: .success(runningJSON)).rows()
+        let rows = await plugin(get: .success(runningJSON)).rows()
 
         #expect(
             rows == [
-                ModuleRow(name: "ci-runner", value: "Running · Busy/idle unknown"),
-                ModuleRow(name: "Allocated", value: "12 CPU · 32 GB"),
-                ModuleRow(name: "Last active", value: "3m ago"),
+                PluginRow(name: "ci-runner", value: "Running · Busy/idle unknown"),
+                PluginRow(name: "Allocated", value: "12 CPU · 32 GB"),
+                PluginRow(name: "Last active", value: "3m ago"),
             ])
     }
 
     @Test("shows the VM as starting while the controller boots it")
     func showsStarting() async {
-        let rows = await module(
+        let rows = await plugin(
             get: .success(runningJSON),
             files: ["state": "START_TIME=\(1_800_000_000 - 20)\nLAST_ACTIVE=0\n"]
         ).rows()
 
-        #expect(rows.first == ModuleRow(name: "ci-runner", value: "Running · Starting"))
-        #expect(rows.last == ModuleRow(name: "Last active", value: "Never"))
+        #expect(rows.first == PluginRow(name: "ci-runner", value: "Running · Starting"))
+        #expect(rows.last == PluginRow(name: "Last active", value: "Never"))
     }
 
     @Test("shows when a failed boot stops blocking new starts")
     func showsBootFailure() async {
         let until = now.addingTimeInterval(600)
 
-        let rows = await module(
+        let rows = await plugin(
             get: .success(stoppedJSON),
             files: ["boot-failed": "\(Int(until.timeIntervalSince1970))\n"]
         ).rows()
 
         #expect(
             rows == [
-                ModuleRow(name: "ci-runner", value: "Stopped"),
-                ModuleRow(
+                PluginRow(name: "ci-runner", value: "Stopped"),
+                PluginRow(
                     name: "Boot failed until",
                     value: until.formatted(date: .omitted, time: .shortened)),
             ])

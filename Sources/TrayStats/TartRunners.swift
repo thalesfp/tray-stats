@@ -154,44 +154,44 @@ private func keyValues<Lines: Sequence<String>>(_ lines: Lines) -> [String: Stri
 enum RunnerRows {
     private static let errorLimit = 40
 
-    static func rows(_ status: RunnerStatus, vm name: String, now: Date) -> [ModuleRow] {
+    static func rows(_ status: RunnerStatus, vm name: String, now: Date) -> [PluginRow] {
         let info: VMInfo
         switch status.vm {
         case .failure(let failure):
             return [
-                ModuleRow(name: "tart", value: Format.clipped(failure.message, limit: errorLimit))
+                PluginRow(name: "tart", value: Format.clipped(failure.message, limit: errorLimit))
             ]
         case .success(let value):
             info = value
         }
 
-        var rows: [ModuleRow] = []
+        var rows: [PluginRow] = []
 
         if info.running {
-            rows.append(ModuleRow(name: name, value: "Running · \(activityLabel(status))"))
+            rows.append(PluginRow(name: name, value: "Running · \(activityLabel(status))"))
 
             if case .busy(let job?) = status.guest?.activity {
-                rows.append(ModuleRow(name: "Job", value: job))
+                rows.append(PluginRow(name: "Job", value: job))
             }
 
             if let guest = status.guest, let memory = guest.memory {
-                rows.append(ModuleRow(name: "Guest", value: guestLabel(memory, load: guest.load)))
+                rows.append(PluginRow(name: "Guest", value: guestLabel(memory, load: guest.load)))
             }
 
             let allocated = Format.memory(UInt64(info.memoryMegabytes) * 1024 * 1024)
-            rows.append(ModuleRow(name: "Allocated", value: "\(info.cpus) CPU · \(allocated)"))
+            rows.append(PluginRow(name: "Allocated", value: "\(info.cpus) CPU · \(allocated)"))
         } else {
-            rows.append(ModuleRow(name: name, value: "Stopped"))
+            rows.append(PluginRow(name: name, value: "Stopped"))
         }
 
         if let controller = status.controller {
             let value = controller.lastActive.map { Format.ago($0, now: now) } ?? "Never"
-            rows.append(ModuleRow(name: "Last active", value: value))
+            rows.append(PluginRow(name: "Last active", value: value))
         }
 
         if let until = status.bootFailedUntil, until > now {
             rows.append(
-                ModuleRow(
+                PluginRow(
                     name: "Boot failed until",
                     value: until.formatted(date: .omitted, time: .shortened)))
         }
@@ -215,11 +215,12 @@ enum RunnerRows {
     }
 }
 
-struct TartRunnerModule: Module {
+struct TartRunnersPlugin: Plugin {
     private static let timeout: TimeInterval = 5
 
     let id = "tartRunners"
     let title = "Tart Runners"
+    let refreshInterval: Duration = .seconds(5)
 
     let config: TartRunnerConfig
     let runner: any CommandRunner
@@ -240,14 +241,14 @@ struct TartRunnerModule: Module {
         self.now = now
     }
 
-    func rows() async -> [ModuleRow] {
+    func rows() async -> [PluginRow] {
         RunnerRows.rows(await status(), vm: config.vm, now: now())
     }
 
     private func status() async -> RunnerStatus {
         let vm = await vmInfo()
         let running = (try? vm.get().running) ?? false
-        let guest = running ? await guestReport() : nil
+        let guest = running && !Task.isCancelled ? await guestReport() : nil
 
         return RunnerStatus(
             vm: vm,

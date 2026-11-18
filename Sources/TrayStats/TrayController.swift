@@ -7,12 +7,10 @@ final class TrayController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private static let openMenuInterval: TimeInterval = 2
     private static let diskInterval: TimeInterval = 60
     private static let rowCount = 5
-    private static let moduleRowCount = 6
-    private static let moduleInterval: Duration = .seconds(5)
 
     private let reader: SystemReader
     private let store: SettingsStore
-    private let modules: [any Module]
+    private let plugins: [any Plugin]
     private let log = Logger(subsystem: "me.thales.traystats", category: "sampling")
 
     private var visible: VisibleMetrics
@@ -22,8 +20,8 @@ final class TrayController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastDiskRead: Date?
     private var processBaseline: (cpu: [Int32: UInt64], at: UInt64)?
     private var menuOpen = false
-    private var menuSession = 0
-    private var moduleTasks: [Task<Void, Never>] = []
+    private var pluginTasks: [Task<Void, Never>?]
+    private var pluginGenerations: [Int]
     private var drawnTitle: String?
     private var temperatureFailed = false
 
@@ -37,18 +35,23 @@ final class TrayController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let temperatureDetail = NSMenuItem()
     private let cpuRows = (0..<rowCount).map { _ in NSMenuItem() }
     private let memoryRows = (0..<rowCount).map { _ in NSMenuItem() }
-    private var moduleHeaders: [NSMenuItem] = []
-    private var moduleRows: [[NSMenuItem]] = []
-    private var moduleToggles: [NSMenuItem] = []
+    private let menu = NSMenu()
+    private var pluginItems: [NSMenuItem] = []
+    private var pluginMenus: [NSMenu] = []
+    private var pluginToggles: [NSMenuItem] = []
     private var metricToggles: [Metric: NSMenuItem] = [:]
     private var refreshChoices: [NSMenuItem] = []
     private let loginToggle = NSMenuItem(
         title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
 
-    init(reader: SystemReader, store: SettingsStore, modules: [any Module]) {
+    init(reader: SystemReader, store: SettingsStore, plugins: [any Plugin]) {
+        store.migratePluginKeys(ids: plugins.map(\.id))
+
         self.reader = reader
         self.store = store
-        self.modules = modules
+        self.plugins = plugins
+        self.pluginTasks = plugins.map { _ in nil }
+        self.pluginGenerations = plugins.map { _ in 0 }
         self.visible = store.load()
         self.refresh = store.loadRefresh()
         super.init()
@@ -75,7 +78,6 @@ final class TrayController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func buildMenu() -> NSMenu {
-        let menu = NSMenu()
         menu.delegate = self
         menu.autoenablesItems = false
 
@@ -90,13 +92,19 @@ final class TrayController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.sectionHeader(title: "Top Memory"))
         memoryRows.forEach(menu.addItem)
 
-        for module in modules {
-            let header = NSMenuItem.sectionHeader(title: module.title)
-            let rows = (0..<Self.moduleRowCount).map { _ in NSMenuItem() }
-            moduleHeaders.append(header)
-            moduleRows.append(rows)
-            menu.addItem(header)
-            rows.forEach(menu.addItem)
+        if !plugins.isEmpty { menu.addItem(.separator()) }
+        for plugin in plugins {
+            // AppKit does not open an empty submenu, so each one always holds a row.
+            let submenu = NSMenu()
+            submenu.delegate = self
+            submenu.autoenablesItems = false
+            show(Self.loadingRows, in: submenu)
+
+            let item = NSMenuItem(title: plugin.title, action: nil, keyEquivalent: "")
+            item.submenu = submenu
+            pluginItems.append(item)
+            pluginMenus.append(submenu)
+            menu.addItem(item)
         }
 
         menu.addItem(.separator())
@@ -109,12 +117,12 @@ final class TrayController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(toggle)
         }
 
-        for (index, module) in modules.enumerated() {
+        for (index, plugin) in plugins.enumerated() {
             let toggle = NSMenuItem(
-                title: "Show \(module.title)", action: #selector(toggleModule), keyEquivalent: "")
+                title: "Show \(plugin.title)", action: #selector(togglePlugin), keyEquivalent: "")
             toggle.target = self
             toggle.tag = index
-            moduleToggles.append(toggle)
+            pluginToggles.append(toggle)
             menu.addItem(toggle)
         }
 
@@ -265,6 +273,8 @@ final class TrayController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    private static let loadingRows = [PluginRow(name: "Loading…", value: "")]
+
     private static func rowTitle(_ name: String, _ value: String) -> NSAttributedString {
         let style = NSMutableParagraphStyle()
         style.tabStops = [NSTextTab(textAlignment: .right, location: 320)]
@@ -279,12 +289,17 @@ final class TrayController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        if let index = pluginMenus.firstIndex(where: { $0 === menu }) {
+            openPlugin(index)
+            return
+        }
+        guard menu === self.menu else { return }
+
         menuOpen = true
-        menuSession += 1
         processBaseline = nil
 
         drawToggles()
-        startModules()
+        drawPluginItems()
         sample()
         startTimer(every: Self.openMenuInterval)
 
@@ -296,44 +311,56 @@ final class TrayController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuDidClose(_ menu: NSMenu) {
+        if let index = pluginMenus.firstIndex(where: { $0 === menu }) {
+            closePlugin(index)
+            return
+        }
+        guard menu === self.menu else { return }
+
         menuOpen = false
-        menuSession += 1
         processBaseline = nil
-        for task in moduleTasks { task.cancel() }
-        moduleTasks = []
+        for index in plugins.indices where pluginTasks[index] != nil { closePlugin(index) }
         firstScan?.invalidate()
         firstScan = nil
 
         startTimer(every: refresh)
     }
 
-    private func startModules() {
-        for (index, module) in modules.enumerated() {
-            let shown = store.isShown(module: module.id)
-            moduleHeaders[index].isHidden = !shown
-
-            guard shown else {
-                fill(moduleRows[index], with: [])
-                continue
-            }
-
-            fill(moduleRows[index], with: [("Loading…", "")])
-            moduleTasks.append(poll(module, index: index, session: menuSession))
+    private func drawPluginItems() {
+        for (index, item) in pluginItems.enumerated() {
+            item.isHidden = !store.isShown(plugin: plugins[index].id)
         }
     }
 
+    private func openPlugin(_ index: Int) {
+        pluginGenerations[index] += 1
+        pluginTasks[index]?.cancel()
+        pluginTasks[index] = poll(
+            plugins[index], index: index, generation: pluginGenerations[index])
+    }
+
+    private func closePlugin(_ index: Int) {
+        pluginGenerations[index] += 1
+        pluginTasks[index]?.cancel()
+        pluginTasks[index] = nil
+
+        show(Self.loadingRows, in: pluginMenus[index])
+    }
+
     /// MainActor tasks do not run while NSMenu tracks events; a .common run loop block does.
-    private func poll(_ module: any Module, index: Int, session: Int) -> Task<Void, Never> {
+    private func poll(_ plugin: any Plugin, index: Int, generation: Int) -> Task<Void, Never> {
         Task.detached { [weak self] in
             while !Task.isCancelled {
-                let rows = await module.rows()
+                let rows = await plugin.rows()
 
                 RunLoop.main.perform(inModes: [.common]) {
-                    MainActor.assumeIsolated { self?.draw(rows, module: index, session: session) }
+                    MainActor.assumeIsolated {
+                        self?.draw(rows, plugin: index, generation: generation)
+                    }
                 }
 
                 do {
-                    try await Task.sleep(for: Self.moduleInterval)
+                    try await Task.sleep(for: plugin.refreshInterval)
                 } catch {
                     return
                 }
@@ -341,10 +368,23 @@ final class TrayController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func draw(_ rows: [ModuleRow], module index: Int, session: Int) {
-        guard session == menuSession else { return }
+    private func draw(_ rows: [PluginRow], plugin index: Int, generation: Int) {
+        guard generation == pluginGenerations[index] else { return }
 
-        fill(moduleRows[index], with: rows.map { ($0.name, $0.value) })
+        show(rows.isEmpty ? Self.loadingRows : rows, in: pluginMenus[index])
+    }
+
+    /// Reuses the submenu items in place: rebuilding the items of an open submenu drops the
+    /// highlight.
+    private func show(_ rows: [PluginRow], in submenu: NSMenu) {
+        while submenu.numberOfItems > rows.count {
+            submenu.removeItem(at: submenu.numberOfItems - 1)
+        }
+        while submenu.numberOfItems < rows.count { submenu.addItem(NSMenuItem()) }
+
+        for (item, row) in zip(submenu.items, rows) {
+            item.attributedTitle = Self.rowTitle(row.name, row.value)
+        }
     }
 
     private func drawToggles() {
@@ -357,8 +397,8 @@ final class TrayController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             choice.state = choice.representedObject as? TimeInterval == refresh ? .on : .off
         }
 
-        for (index, toggle) in moduleToggles.enumerated() {
-            toggle.state = store.isShown(module: modules[index].id) ? .on : .off
+        for (index, toggle) in pluginToggles.enumerated() {
+            toggle.state = store.isShown(plugin: plugins[index].id) ? .on : .off
         }
 
         loginToggle.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -389,11 +429,12 @@ final class TrayController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         drawToggles()
     }
 
-    @objc private func toggleModule(_ sender: NSMenuItem) {
-        let id = modules[sender.tag].id
-        store.save(module: id, shown: !store.isShown(module: id))
+    @objc private func togglePlugin(_ sender: NSMenuItem) {
+        let id = plugins[sender.tag].id
+        store.save(plugin: id, shown: !store.isShown(plugin: id))
 
         drawToggles()
+        drawPluginItems()
     }
 
     @objc private func toggleLogin() {

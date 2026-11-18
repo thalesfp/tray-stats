@@ -12,8 +12,6 @@ protocol CommandRunner: Sendable {
 }
 
 struct ProcessRunner: CommandRunner {
-    private static let killGrace: TimeInterval = 1
-
     func run(_ path: String, _ arguments: [String], timeout: TimeInterval) async throws -> String {
         guard FileManager.default.isExecutableFile(atPath: path) else {
             throw CommandFailure(message: "not found")
@@ -59,22 +57,11 @@ struct ProcessRunner: CommandRunner {
                     guard process.isRunning else { return }
 
                     timedOut.withLock { $0 = true }
-                    Self.stop(process)
+                    stopProcess(process)
                 }
             }
         } onCancel: {
-            Self.stop(process)
-        }
-    }
-
-    private static func stop(_ process: Process) {
-        guard process.isRunning else { return }
-
-        process.terminate()
-
-        let pid = process.processIdentifier
-        DispatchQueue.global().asyncAfter(deadline: .now() + killGrace) {
-            if process.isRunning { kill(pid, SIGKILL) }
+            stopProcess(process)
         }
     }
 
@@ -83,5 +70,19 @@ struct ProcessRunner: CommandRunner {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         return CommandFailure(message: text.isEmpty ? "exited with \(status)" : text)
+    }
+}
+
+private let killGrace: TimeInterval = 1
+
+/// Sends SIGTERM to a running process, then SIGKILL if it still runs after a short grace.
+func stopProcess(_ process: Process) {
+    guard process.isRunning else { return }
+
+    process.terminate()
+
+    let pid = process.processIdentifier
+    DispatchQueue.global().asyncAfter(deadline: .now() + killGrace) {
+        if process.isRunning { kill(pid, SIGKILL) }
     }
 }

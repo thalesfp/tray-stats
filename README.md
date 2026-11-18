@@ -13,15 +13,16 @@ CPU 12%  MEM 68%  DSK 41%  TMP 64°
 - The top 5 processes by CPU and by memory, updated while the menu is open.
 - Refresh every 2, 5, 10 or 30 seconds.
 - Launch at login.
-- Optional [plugins](#plugins) that add sections to the menu.
+- Optional [plugins](#plugins), each in its own submenu.
 
 ## Plugins
 
-Plugins add sections to the menu. You can show or hide each one from the menu.
+Each plugin opens as a submenu. It loads its data when you open the submenu and refreshes while the submenu stays open. You can show or hide each plugin from the menu.
 
 | Plugin | What it shows |
 | --- | --- |
 | Tart Runners | The state of a local [Tart](https://tart.run) CI runner VM: running or stopped, busy or idle, the current job, guest memory and load, and when the runner was last active. |
+| Codex | Your [Codex](https://github.com/openai/codex) usage: the 5 hour and weekly limits, when each one renews, the reset credits you have and when they expire, your plan and paid credits. It asks the local `codex app-server`, so it needs the Codex CLI installed and signed in. |
 
 ## Requirements
 

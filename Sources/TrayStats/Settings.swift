@@ -70,15 +70,29 @@ struct SettingsStore {
         }
     }
 
-    func isShown(module id: String) -> Bool {
-        defaults.object(forKey: moduleKey(id)) as? Bool ?? true
+    func isShown(plugin id: String) -> Bool {
+        defaults.object(forKey: pluginKey(id)) as? Bool ?? true
     }
 
-    func save(module id: String, shown: Bool) {
-        defaults.set(shown, forKey: moduleKey(id))
+    func save(plugin id: String, shown: Bool) {
+        defaults.set(shown, forKey: pluginKey(id))
     }
 
-    private func moduleKey(_ id: String) -> String { "show.module.\(id)" }
+    /// Moves each show.module.<id> setting to show.plugin.<id>. A show.plugin.<id> value that
+    /// already exists is kept.
+    func migratePluginKeys(ids: [String]) {
+        for id in ids {
+            let oldKey = "show.module.\(id)"
+            guard let value = defaults.object(forKey: oldKey) else { continue }
+
+            if defaults.object(forKey: pluginKey(id)) == nil {
+                defaults.set(value, forKey: pluginKey(id))
+            }
+            defaults.removeObject(forKey: oldKey)
+        }
+    }
+
+    private func pluginKey(_ id: String) -> String { "show.plugin.\(id)" }
 
     func loadRefresh() -> TimeInterval {
         let stored = defaults.double(forKey: Self.refreshKey)
