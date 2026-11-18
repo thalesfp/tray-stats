@@ -20,8 +20,11 @@ let codex = CodexPlugin(
     now: { Date() },
     calendar: .current
 )
+let claudeCode = ClaudeCodePlugin(
+    login: KeychainLogin(), fetcher: URLSessionFetcher(), now: { Date() }, calendar: .current)
 let controller = TrayController(
-    reader: reader, store: SettingsStore(defaults: .standard), plugins: [tartRunners, codex])
+    reader: reader, store: SettingsStore(defaults: .standard),
+    plugins: [tartRunners, codex, claudeCode])
 
 let application = NSApplication.shared
 application.setActivationPolicy(.accessory)

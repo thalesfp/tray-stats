@@ -130,7 +130,6 @@ enum CodexReply {
 
 enum CodexRows {
     private static let errorLimit = 40
-    private static let day: TimeInterval = 24 * 60 * 60
     private static let plans = [
         "free": "Free", "go": "Go", "plus": "Plus", "pro": "Pro", "prolite": "Pro Lite",
         "promax": "Pro Max", "team": "Team", "business": "Business", "enterprise": "Enterprise",
@@ -157,7 +156,8 @@ enum CodexRows {
             if let resetsAt = window.resetsAt {
                 rows.append(
                     PluginRow(
-                        name: "Renews", value: renewal(resetsAt, now: now, calendar: calendar)))
+                        name: "Renews",
+                        value: Format.renewal(resetsAt, now: now, calendar: calendar)))
             }
         }
 
@@ -192,41 +192,13 @@ enum CodexRows {
         }
     }
 
-    private static func renewal(_ date: Date, now: Date, calendar: Calendar) -> String {
-        let left = date.timeIntervalSince(now)
-        let time = formatted(date, left < day ? "HH:mm" : "EEE HH:mm", calendar: calendar)
-
-        return "\(time) (\(remaining(left)))"
-    }
-
-    private static func remaining(_ interval: TimeInterval) -> String {
-        let minutes = Int(interval / 60)
-        guard minutes > 0 else { return "now" }
-
-        let (days, hours) = (minutes / 1440, minutes % 1440 / 60)
-        if days > 0 { return "in \(days)d \(hours)h" }
-        if hours > 0 { return "in \(hours)h \(minutes % 60)m" }
-
-        return "in \(minutes)m"
-    }
-
     private static func resetLabel(_ resets: CodexResetCredits, calendar: Calendar) -> String {
         guard resets.count > 0 else { return "None" }
 
         let available = "\(resets.count) available"
         guard let expiry = resets.earliestExpiry else { return available }
 
-        return "\(available) · expires \(formatted(expiry, "MMM d", calendar: calendar))"
-    }
-
-    private static func formatted(_ date: Date, _ format: String, calendar: Calendar) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
-        formatter.dateFormat = format
-
-        return formatter.string(from: date)
+        return "\(available) · expires \(Format.date(expiry, "MMM d", calendar: calendar))"
     }
 
     private static func sentence(_ code: String) -> String {
@@ -249,7 +221,7 @@ func codexPath(home: URL, exists: (String) -> Bool) -> String? {
 struct CodexPlugin: Plugin {
     let id = "codex"
     let title = "Codex"
-    let refreshInterval: Duration = .seconds(60)
+    let refreshInterval: Duration? = .seconds(60)
 
     let client: any CodexClient
     let now: @Sendable () -> Date

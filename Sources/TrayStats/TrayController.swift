@@ -275,17 +275,21 @@ final class TrayController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private static let loadingRows = [PluginRow(name: "Loading…", value: "")]
 
-    private static func rowTitle(_ name: String, _ value: String) -> NSAttributedString {
+    private static func rowTitle(_ name: String, _ value: String, dimmed: Bool = false)
+        -> NSAttributedString
+    {
         let style = NSMutableParagraphStyle()
         style.tabStops = [NSTextTab(textAlignment: .right, location: 320)]
 
+        var attributes: [NSAttributedString.Key: Any] = [
+            .paragraphStyle: style,
+            .font: NSFont.monospacedDigitSystemFont(
+                ofSize: NSFont.menuFont(ofSize: 0).pointSize, weight: .regular),
+        ]
+        if dimmed { attributes[.foregroundColor] = NSColor.secondaryLabelColor }
+
         return NSAttributedString(
-            string: "\(Format.processName(name))\t\(value)",
-            attributes: [
-                .paragraphStyle: style,
-                .font: NSFont.monospacedDigitSystemFont(
-                    ofSize: NSFont.menuFont(ofSize: 0).pointSize, weight: .regular),
-            ])
+            string: "\(Format.processName(name))\t\(value)", attributes: attributes)
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -359,8 +363,10 @@ final class TrayController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     }
                 }
 
+                guard let interval = plugin.refreshInterval else { return }
+
                 do {
-                    try await Task.sleep(for: plugin.refreshInterval)
+                    try await Task.sleep(for: interval)
                 } catch {
                     return
                 }
@@ -383,7 +389,7 @@ final class TrayController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         while submenu.numberOfItems < rows.count { submenu.addItem(NSMenuItem()) }
 
         for (item, row) in zip(submenu.items, rows) {
-            item.attributedTitle = Self.rowTitle(row.name, row.value)
+            item.attributedTitle = Self.rowTitle(row.name, row.value, dimmed: row.dimmed)
         }
     }
 

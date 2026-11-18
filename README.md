@@ -17,12 +17,13 @@ CPU 12%  MEM 68%  DSK 41%  TMP 64°
 
 ## Plugins
 
-Each plugin opens as a submenu. It loads its data when you open the submenu and refreshes while the submenu stays open. You can show or hide each plugin from the menu.
+Each plugin opens as a submenu and loads its data when you open it. Tart Runners and Codex refresh while the submenu stays open. Claude Code loads once per open and reuses a result under a minute old. You can show or hide each plugin from the menu.
 
 | Plugin | What it shows |
 | --- | --- |
 | Tart Runners | The state of a local [Tart](https://tart.run) CI runner VM: running or stopped, busy or idle, the current job, guest memory and load, and when the runner was last active. |
 | Codex | Your [Codex](https://github.com/openai/codex) usage: the 5 hour and weekly limits, when each one renews, the reset credits you have and when they expire, your plan and paid credits. It asks the local `codex app-server`, so it needs the Codex CLI installed and signed in. |
+| Claude Code | Your Claude Code plan limits: each limit with its usage and renewal, the share of a model's weekly allowance, and whether extra usage is on. It reads the Claude Code login from the Keychain, so macOS asks for access the first time and again after each new build. It calls an undocumented Claude account usage endpoint, which can change. When the login has expired, open Claude Code to refresh it. |
 
 ## Requirements
 

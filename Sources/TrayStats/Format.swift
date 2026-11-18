@@ -92,6 +92,36 @@ enum Format {
         }
     }
 
+    /// "14:20 (in 1h 5m)" within a day, else "Fri 19:40 (in 2d 8h)".
+    static func renewal(_ date: Date, now: Date, calendar: Calendar) -> String {
+        let left = date.timeIntervalSince(now)
+        let time = Format.date(date, left < 86400 ? "HH:mm" : "EEE HH:mm", calendar: calendar)
+
+        return "\(time) (\(remaining(left)))"
+    }
+
+    private static func remaining(_ interval: TimeInterval) -> String {
+        let minutes = Int(interval / 60)
+        guard minutes > 0 else { return "now" }
+
+        let (days, hours) = (minutes / 1440, minutes % 1440 / 60)
+        if days > 0 { return "in \(days)d \(hours)h" }
+        if hours > 0 { return "in \(hours)h \(minutes % 60)m" }
+
+        return "in \(minutes)m"
+    }
+
+    /// Formats with a fixed English locale, so labels do not change with the system language.
+    static func date(_ date: Date, _ format: String, calendar: Calendar) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = format
+
+        return formatter.string(from: date)
+    }
+
     static func processCPU(_ share: Double) -> String {
         String(format: "%.1f%%", share * 100)
     }

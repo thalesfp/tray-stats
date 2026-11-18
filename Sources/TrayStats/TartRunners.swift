@@ -220,7 +220,7 @@ struct TartRunnersPlugin: Plugin {
 
     let id = "tartRunners"
     let title = "Tart Runners"
-    let refreshInterval: Duration = .seconds(5)
+    let refreshInterval: Duration? = .seconds(5)
 
     let config: TartRunnerConfig
     let runner: any CommandRunner
